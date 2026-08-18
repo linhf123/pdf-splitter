@@ -38,9 +38,9 @@ export default function ResultList({ results, splitting, splitProgress, fileName
     if (zipping) return
     setZipping(true)
     try {
-      // 包名带原文件名 + 点击时刻的时间戳，避免多次打包覆盖混淆
-      const base = fileName.replace(/\.pdf$/i, '') || '拆分结果'
-      const zipName = `${base}_拆分结果_${timestamp()}.zip`
+      // 包名带原文件名 + 点击时刻的时间戳；原文件名为空或本身就是「拆分结果」时避免重复拼接
+      const base = fileName.replace(/\.pdf$/i, '').replace(/_?拆分结果$/, '')
+      const zipName = `${base ? `${base}_` : ''}拆分结果_${timestamp()}.zip`
       await downloadZip(
         results.map((r) => ({ name: r.name, blob: r.blob })),
         zipName,
