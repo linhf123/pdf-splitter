@@ -14,7 +14,8 @@ export default defineConfig({
           if (!id.includes('node_modules')) return
           if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'react-vendor'
           if (/node_modules\/(antd|@ant-design|rc-|@rc-component)\//.test(id)) return 'antd-vendor'
-          if (/node_modules\/(pdfjs-dist|pdf-lib)\//.test(id)) return 'pdf'
+          // pdf-lib 已移入拆分 Web Worker（独立 bundle），主包只含 pdfjs-dist
+          if (/node_modules\/pdfjs-dist\//.test(id)) return 'pdf'
         },
       },
     },

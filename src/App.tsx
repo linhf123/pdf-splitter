@@ -6,18 +6,16 @@ import UploadArea from './components/UploadArea'
 import PreviewGrid from './components/PreviewGrid'
 import SplitConfig from './components/SplitConfig'
 import ResultList from './components/ResultList'
-import {
-  computeAutoRanges,
-  loadPdfInfo,
-  renderPage,
-  splitPdf,
-  validateRanges,
-} from './utils/pdf'
+import { loadPdfInfo, renderPage } from './utils/pdf'
+import { computeAutoRanges, validateRanges } from './utils/ranges'
+import { splitPdfInWorker } from './utils/split'
 import { formatSize } from './utils/download'
 import type { PageRange, SplitFile, SplitMode } from './types'
 
 // 缩略图并发渲染数，避免大文件时同时渲染过多页面卡住主线程
 const RENDER_CONCURRENCY = 2
+// 缩略图缓存上限：超过后按 LRU 淘汰视野外的页，控制超大 PDF 滚动时的内存
+const PREVIEW_CACHE_CAP = 300
 
 export default function App() {
   const { message } = AntdApp.useApp()
@@ -42,6 +40,12 @@ export default function App() {
   const queueRef = useRef<number[]>([])
   const inFlightRef = useRef<Set<number>>(new Set())
   const busyRef = useRef(0)
+  // 已渲染缩略图的 LRU 缓存：page -> dataURL，Map 迭代顺序即最近使用序
+  const previewCacheRef = useRef<Map<number, string>>(new Map())
+  // 当前可视页集合（由 PreviewGrid 上报），LRU 淘汰时避开这些页
+  const visibleRef = useRef<Set<number>>(new Set())
+  // 当前拆分 worker 的取消控制器（换文件/重置时终止）
+  const controllerRef = useRef<AbortController | null>(null)
   // 供回调读取的最新页数（渲染时保证已提交）
   const pageCountRef = useRef(pageCount)
   pageCountRef.current = pageCount
@@ -69,8 +73,25 @@ export default function App() {
     queueRef.current = []
     inFlightRef.current.clear()
     busyRef.current = 0
+    previewCacheRef.current.clear()
+    visibleRef.current = new Set()
     setFailedPages(new Set())
   }
+
+  /** 提交一页渲染结果到 LRU 缓存；超出上限时淘汰视野外的最久未用页 */
+  const commitRender = useCallback((page: number, url: string) => {
+    const cache = previewCacheRef.current
+    cache.delete(page)
+    cache.set(page, url)
+    while (cache.size > PREVIEW_CACHE_CAP) {
+      const oldest = cache.keys().next().value as number | undefined
+      if (oldest == null || visibleRef.current.has(oldest)) break
+      cache.delete(oldest)
+    }
+    const next = new Array<string | null>(pageCountRef.current).fill(null)
+    for (const [p, u] of cache) next[p - 1] = u
+    setPreviews(next)
+  }, [])
 
   /** 从队列里按并发上限逐页渲染缩略图 */
   const pumpQueue = useCallback((gen: number) => {
@@ -89,12 +110,7 @@ export default function App() {
           busyRef.current--
           inFlightRef.current.delete(page)
           if (genRef.current !== gen) return
-          setPreviews((prev) => {
-            if (page - 1 >= prev.length) return prev
-            const next = [...prev]
-            next[page - 1] = url
-            return next
-          })
+          commitRender(page, url)
           pumpQueue(gen)
         })
         .catch(() => {
@@ -111,7 +127,7 @@ export default function App() {
           pumpQueue(gen)
         })
     }
-  }, [])
+  }, [commitRender])
 
   /** 请求渲染缺失页面（1-based），已缓存或已入队的自动去重 */
   const requestPages = useCallback(
@@ -129,8 +145,15 @@ export default function App() {
     [pumpQueue],
   )
 
+  /** 记录 PreviewGrid 当前可视页，供 LRU 淘汰时避开 */
+  const handleVisibleChange = useCallback((pages: Set<number>) => {
+    visibleRef.current = pages
+  }, [])
+
   const handleFile = async (f: File, ab: ArrayBuffer) => {
     const gen = ++genRef.current
+    controllerRef.current?.abort()
+    controllerRef.current = null
     clearRenderState()
     setFile(f)
     setArrayBuffer(ab)
@@ -172,6 +195,8 @@ export default function App() {
       queueRef.current = []
       inFlightRef.current.clear()
       busyRef.current = 0
+      previewCacheRef.current.clear()
+      visibleRef.current = new Set()
       setFailedPages(new Set())
       setPreviews((prev) =>
         prev.length > 0 ? new Array<string | null>(prev.length).fill(null) : prev,
@@ -182,13 +207,21 @@ export default function App() {
   const handleStartSplit = async () => {
     if (!arrayBuffer || rangeError) return
     const gen = genRef.current
+    const controller = new AbortController()
+    controllerRef.current = controller
     setSplitting(true)
     setResults([])
     setSplitProgress({ done: 0, total: effectiveRanges.length })
     try {
-      const blobs = await splitPdf(arrayBuffer, effectiveRanges, (done, total) => {
-        if (genRef.current === gen) setSplitProgress({ done, total })
-      })
+      const blobs = await splitPdfInWorker(
+        arrayBuffer,
+        effectiveRanges,
+        (done, total) => {
+          if (genRef.current === gen) setSplitProgress({ done, total })
+        },
+        controller.signal,
+      )
+      if (genRef.current !== gen) return
       const base = (file?.name ?? 'output').replace(/\.pdf$/i, '')
       const list: SplitFile[] = blobs.map((blob, i) => {
         const r = effectiveRanges[i]
@@ -204,14 +237,19 @@ export default function App() {
       setResults(list)
       message.success(`已生成 ${list.length} 份 PDF`)
     } catch (e) {
+      // 换文件/重置导致的中途取消不弹错误
+      if (genRef.current !== gen || controller.signal.aborted) return
       message.error(`拆分失败：${e instanceof Error ? e.message : String(e)}`)
     } finally {
       if (genRef.current === gen) setSplitting(false)
+      if (controllerRef.current === controller) controllerRef.current = null
     }
   }
 
   const reset = () => {
     genRef.current++
+    controllerRef.current?.abort()
+    controllerRef.current = null
     clearRenderState()
     setFile(null)
     setArrayBuffer(null)
@@ -268,6 +306,7 @@ export default function App() {
                 failed={failedPages}
                 enabled={previewEnabled}
                 onRequestPages={requestPages}
+                onVisibleChange={handleVisibleChange}
               />
             </Card>
             <Card title="第二步：设置拆分规则" style={{ flex: '1 1 300px' }}>

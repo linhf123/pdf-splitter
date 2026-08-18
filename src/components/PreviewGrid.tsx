@@ -29,6 +29,8 @@ interface Props {
   enabled: boolean
   /** 请求渲染若干缺失页面的缩略图（页码 1-based） */
   onRequestPages: (pages: number[]) => void
+  /** 上报当前可视的页码集合（1-based），供上层做缓存淘汰 */
+  onVisibleChange?: (pages: Set<number>) => void
 }
 
 export default function PreviewGrid({
@@ -38,6 +40,7 @@ export default function PreviewGrid({
   failed,
   enabled,
   onRequestPages,
+  onVisibleChange,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [viewport, setViewport] = useState({ width: 500, height: CONTAINER_HEIGHT })
@@ -80,6 +83,20 @@ export default function PreviewGrid({
     }
     if (missing.length) onRequestPages(missing)
   }, [enabled, onRequestPages, pageCount, columnCount, previews, failed, startRow, endRow])
+
+  // 上报当前可视页集合，供上层 LRU 缓存淘汰时避开
+  useEffect(() => {
+    if (!enabled) return
+    const visible = new Set<number>()
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = 0; c < columnCount; c++) {
+        const p = r * columnCount + c + 1
+        if (p > pageCount) break
+        visible.add(p)
+      }
+    }
+    onVisibleChange?.(visible)
+  }, [enabled, onVisibleChange, pageCount, columnCount, startRow, endRow])
 
   if (pageCount === 0) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="上传 PDF 后此处显示每页缩略图" />
