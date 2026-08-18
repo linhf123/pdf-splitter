@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(xargs kill)",
+      "Read(//Users/linhuifeng/Documents/**)",
+      "Bash(gh auth *)",
+      "Bash(gh api *)",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(git -c user.name=linhf123 -c user.email=linhf123@users.noreply.github.com commit -m \"Initial commit: PDF page splitter \\(Vite + React + TS\\)\")"
+    ]
+  }
+}
