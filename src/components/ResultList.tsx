@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Alert, Button, Empty, List, Progress, Space, Typography } from 'antd'
+import { Alert, App, Button, Empty, List, Progress, Space, Typography } from 'antd'
 import {
   CloudDownloadOutlined,
   DownloadOutlined,
@@ -27,6 +27,7 @@ interface Props {
 }
 
 export default function ResultList({ results, splitting, splitProgress, onReset }: Props) {
+  const { message } = App.useApp()
   const [zipping, setZipping] = useState(false)
 
   if (results.length === 0 && !splitting) return null
@@ -41,6 +42,8 @@ export default function ResultList({ results, splitting, splitProgress, onReset 
         results.map((r) => ({ name: r.name, blob: r.blob })),
         zipName,
       )
+    } catch {
+      message.error('打包 ZIP 失败，请重试或逐份下载')
     } finally {
       setZipping(false)
     }

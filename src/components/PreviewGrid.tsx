@@ -23,6 +23,8 @@ interface Props {
   previews: (string | null)[]
   /** 需要高亮展示的页码集合（1-based），用于联动拆分范围 */
   covered?: Set<number>
+  /** 渲染失败的页码：停止请求，显示占位提示而非无限 spinner */
+  failed?: Set<number>
   /** 是否开启预览；关闭时只渲染占位提示，不请求任何页面 */
   enabled: boolean
   /** 请求渲染若干缺失页面的缩略图（页码 1-based） */
@@ -33,6 +35,7 @@ export default function PreviewGrid({
   pageCount,
   previews,
   covered,
+  failed,
   enabled,
   onRequestPages,
 }: Props) {
@@ -71,11 +74,12 @@ export default function PreviewGrid({
       for (let c = 0; c < columnCount; c++) {
         const p = r * columnCount + c + 1
         if (p > pageCount) break
-        if (previews[p - 1] == null) missing.push(p)
+        // 渲染失败的页不再请求，避免无限重试
+        if (previews[p - 1] == null && !failed?.has(p)) missing.push(p)
       }
     }
     if (missing.length) onRequestPages(missing)
-  }, [enabled, onRequestPages, pageCount, columnCount, previews, startRow, endRow])
+  }, [enabled, onRequestPages, pageCount, columnCount, previews, failed, startRow, endRow])
 
   if (pageCount === 0) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="上传 PDF 后此处显示每页缩略图" />
@@ -150,6 +154,10 @@ export default function PreviewGrid({
                         alt={`第 ${page} 页`}
                         style={{ maxWidth: '100%', maxHeight: '100%' }}
                       />
+                    ) : failed?.has(page) ? (
+                      <span style={{ fontSize: 12, color: 'rgba(0,0,0,0.35)' }}>
+                        渲染失败
+                      </span>
                     ) : (
                       <Spin size="small" />
                     )}

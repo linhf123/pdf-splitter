@@ -91,13 +91,16 @@ export function validateRanges(ranges: PageRange[], pageCount: number): RangeVal
       }
     }
   }
-  let warning: string | null = null
+  const overlaps: string[] = []
   for (let i = 0; i < ranges.length; i++) {
     for (let j = i + 1; j < ranges.length; j++) {
       if (ranges[i].start <= ranges[j].end && ranges[j].start <= ranges[i].end) {
-        warning = `第 ${i + 1} 份与第 ${j + 1} 份页码范围重叠（允许但会重复包含页面）`
+        overlaps.push(`第 ${i + 1} 份与第 ${j + 1} 份页码范围重叠`)
       }
     }
   }
+  const warning = overlaps.length
+    ? `${overlaps.join('、')}（允许，但会重复包含页面）`
+    : null
   return { error: null, warning }
 }

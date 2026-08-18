@@ -26,6 +26,8 @@ export default function App() {
   const [pageCount, setPageCount] = useState(0)
   const [previews, setPreviews] = useState<(string | null)[]>([])
   const [previewEnabled, setPreviewEnabled] = useState(false)
+  // 渲染失败的页码：展示占位提示并停止重试，避免无限 spinner 与滚动时重复渲染
+  const [failedPages, setFailedPages] = useState<Set<number>>(new Set())
   const [mode, setMode] = useState<SplitMode>('auto')
   const [pagesPerFile, setPagesPerFile] = useState(100)
   const [customRanges, setCustomRanges] = useState<PageRange[]>([{ start: 1, end: 1 }])
@@ -67,6 +69,7 @@ export default function App() {
     queueRef.current = []
     inFlightRef.current.clear()
     busyRef.current = 0
+    setFailedPages(new Set())
   }
 
   /** 从队列里按并发上限逐页渲染缩略图 */
@@ -97,6 +100,14 @@ export default function App() {
         .catch(() => {
           busyRef.current--
           inFlightRef.current.delete(page)
+          if (genRef.current === gen) {
+            setFailedPages((prev) => {
+              if (prev.has(page)) return prev
+              const next = new Set(prev)
+              next.add(page)
+              return next
+            })
+          }
           pumpQueue(gen)
         })
     }
@@ -138,8 +149,18 @@ export default function App() {
       setPageCount(info.pageCount)
       setPreviews(new Array<string | null>(info.pageCount).fill(null))
       setCustomRanges([{ start: 1, end: info.pageCount }])
+      // 每份页数不得超过新文件总页数
+      setPagesPerFile((prev) => Math.min(prev, info.pageCount))
     } catch (e) {
       if (genRef.current !== gen) return
+      // 解析失败时回滚文件状态，避免界面停在「已选文件但 0 页」的中间态
+      setFile(null)
+      setArrayBuffer(null)
+      setPageCount(0)
+      setPreviews([])
+      setPreviewEnabled(false)
+      setResults([])
+      setSplitting(false)
       message.error(`PDF 解析失败：${e instanceof Error ? e.message : String(e)}`)
     }
   }
@@ -151,6 +172,7 @@ export default function App() {
       queueRef.current = []
       inFlightRef.current.clear()
       busyRef.current = 0
+      setFailedPages(new Set())
       setPreviews((prev) =>
         prev.length > 0 ? new Array<string | null>(prev.length).fill(null) : prev,
       )
@@ -243,6 +265,7 @@ export default function App() {
                 pageCount={pageCount}
                 previews={previews}
                 covered={covered}
+                failed={failedPages}
                 enabled={previewEnabled}
                 onRequestPages={requestPages}
               />
