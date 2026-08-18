@@ -332,6 +332,7 @@ export default function App() {
               results={results}
               splitting={splitting}
               splitProgress={splitProgress}
+              fileName={file?.name ?? ''}
               onReset={reset}
             />
           </Card>

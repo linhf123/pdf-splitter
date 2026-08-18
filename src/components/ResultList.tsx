@@ -23,10 +23,12 @@ interface Props {
   results: SplitFile[]
   splitting: boolean
   splitProgress: { done: number; total: number }
+  /** 原 PDF 文件名，用于 ZIP 包命名 */
+  fileName: string
   onReset: () => void
 }
 
-export default function ResultList({ results, splitting, splitProgress, onReset }: Props) {
+export default function ResultList({ results, splitting, splitProgress, fileName, onReset }: Props) {
   const { message } = App.useApp()
   const [zipping, setZipping] = useState(false)
 
@@ -36,8 +38,9 @@ export default function ResultList({ results, splitting, splitProgress, onReset 
     if (zipping) return
     setZipping(true)
     try {
-      // 文件名带点击时刻的时间戳，避免多次打包覆盖混淆
-      const zipName = `拆分结果_${timestamp()}.zip`
+      // 包名带原文件名 + 点击时刻的时间戳，避免多次打包覆盖混淆
+      const base = fileName.replace(/\.pdf$/i, '') || '拆分结果'
+      const zipName = `${base}_拆分结果_${timestamp()}.zip`
       await downloadZip(
         results.map((r) => ({ name: r.name, blob: r.blob })),
         zipName,
